@@ -39,3 +39,6 @@ Then exit from container and rebuild the image:
 ## Packages installed (please update it if you install any other package):
 - fastapi
 - uvicorn[standard]
+- sqlalchemy
+- pydantic-settings
+- psycopg[binary]
