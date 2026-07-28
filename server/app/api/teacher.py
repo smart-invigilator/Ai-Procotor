@@ -1,17 +1,8 @@
 from fastapi import APIRouter
 
 router = APIRouter(
-    prefix="/auth",
-    tags=["Authentication"]
+    prefix="/teacher",
 )
-
-
-@router.post("/register")
-def register():
-    return {
-        "success": True,
-        "message": "User registered successfully"
-    }
 
 
 @router.post("/login")

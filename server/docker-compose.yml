@@ -1,0 +1,29 @@
+services:
+  server:
+    image: server
+    container_name: server
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/server
+    environment:
+      REDIS_URL: redis://redis:6379/0
+    command: tail -f /dev/null
+    stdin_open: true
+    tty: true
+    depends_on:
+      - redis
+    networks:
+      - app-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    ports:
+      - "6379:6379"
+    networks:
+      - app-network
+
+networks:
+  app-network:
+    driver: bridge
