@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 
-from app.schemas.auth import (RegisterRequest, LoginRequest, LogoutRequest)
+from app.schemas.auth import (RegisterRequest, RequestEmailVerificationRequest, VerifyEmailRequest)
 from app.schemas.invitation import SendInvitationRequest
 from app.core.database import get_db
 from app.services.password import (hash_password, verify_password)
@@ -11,82 +11,165 @@ from app.models.institution import Institution
 from app.models.admin import Admin
 from app.models.refresh_token import (RefreshToken, UserType)
 from app.dependencies.auth import get_current_user
+from app.services.otp import (generate_otp, hash_otp)
+from app.core.redis import redis_client
 from app.services.jwt import (
     create_access_token,
     create_refresh_token,
     hash_refresh_token,
-    decode_access_token
+    decode_access_token,
+    create_signup_token
 )
 
 router = APIRouter(
     prefix="/institution"
 )
 
-# we have to break this 'register' api into 3 different apis for email verification:
+# we have to break 'register' api into 3 different apis for email verification:
 # 1. request otp
 # 2. verify otp
 # 3. register
 
 # 1.
-# @router.post("/request-email-verification")
-# def sendOTP():
-    # get user email
-    # check if it exists already
-    # generate 6 digit otp
-    # hash otp
-    # store otp for 10min in redis cache
-    # send that otp code to the email
-    # return success message
+@router.post("/request-email-verification")
+def sendOTP(
+    payload: RequestEmailVerificationRequest,
+    db: Session = Depends(get_db)
+):
+    email = payload.email.lower().strip()
+
+    institution = (
+        db.query(Institution)
+        .filter(Institution.email == email)
+        .first()
+    )
+
+    if institution:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email is already registered."
+        )
+    
+    existing = redis_client.get(f"email_verification:{email}")
+
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="A verification code was already sent. Please wait before requesting another."
+        )
+
+    
+    otp = generate_otp()
+    otp_hash = hash_otp(otp)
+
+    try:
+        redis_client.setex(
+            f"email_verification:{email}",
+            300,
+            otp_hash
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Unable to send verification code."
+        )
+
+    # TODO: Send email
+    print(f"OTP for {email}: {otp}")
+
+    return {
+        "success": True,
+        "message": "Verification code sent successfully."
+    }
 
 # 2.
-# @router.post("/verify-email")
-# def verifyEmail():
-    # get otp and email from user
-    # check if that otp exists in your redis cache with same email and not expired
-    # email verified
-    # generate temporary signup token (access token jwt with a property type as signup_token) with 1 hour expiration (it would not be able to access any protected api)
-    # send token to client
+@router.post("/verify-email")
+def verifyEmail(
+    payload: VerifyEmailRequest
+):
+    email = payload.email.lower().strip()
+
+    stored_otp_hash = redis_client.get(
+        f"email_verification:{email}"
+    )
+
+    if stored_otp_hash is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid OTP."
+        )
+    
+    provided_hash = hash_otp(payload.otp)
+
+    print(payload.otp, stored_otp_hash, provided_hash)
+
+    if stored_otp_hash != provided_hash:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid OTP."
+        )
+
+    redis_client.delete(f"email_verification:{email}")
+
+    signup_token = create_signup_token(email)
+
+    return {
+        "success": True,
+        "message": "Email verified successfully.",
+        "data": {
+            "signup_token": signup_token
+        }
+    }
 
 # 3.
-# @router.post("/register")
-# def register():
-    # get token, name and password
-    # validate token
-    # make a new entry in institutions table
-    # success
-
-@router.post("/register", status_code=status.HTTP_201_CREATED)
-def register(
+@router.post("/register")
+def register_institution(
     payload: RegisterRequest,
     db: Session = Depends(get_db)
 ):
-    hashed_password = hash_password(payload.password)
-    institution = Institution(
-        name=payload.name,
-        email=payload.email.lower().strip(),
-        password=hashed_password
+    try:
+        token_data = decode_access_token(payload.signup_token)
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Signup token expired."
+        )
+    except jwt.InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid signup token."
+        )
+
+    if token_data.get("purpose") != "signup":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid signup token."
+        )
+
+    email = token_data["email"]
+
+    existing = (
+        db.query(Institution)
+        .filter(Institution.email == email)
+        .first()
     )
+
+    if existing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email is already registered."
+        )
+
+    institution = Institution(
+        name=payload.name.strip(),
+        email=email,
+        password=hash_password(payload.password)
+    )
+
     try:
         db.add(institution)
         db.commit()
         db.refresh(institution)
-
-        return {
-            "success": True,
-            "message": "Institution registered successfully.",
-            "data": {
-                "id": institution.id,
-                "name": institution.name,
-                "email": institution.email
-            }
-        }
-    except IntegrityError:
-        db.rollback()
-
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="Email already exists."
-        )
 
     except Exception:
         db.rollback()
@@ -95,6 +178,16 @@ def register(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Something went wrong."
         )
+
+    return {
+        "success": True,
+        "message": "Registration successful.",
+        "data": {
+            "id": institution.id,
+            "name": institution.name,
+            "email": institution.email
+        }
+    }
 
 
 # yet to implement email sending

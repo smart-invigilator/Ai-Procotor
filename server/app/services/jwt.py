@@ -10,6 +10,7 @@ from app.core.config import settings
 ALGORITHM = "HS256"
 
 ACCESS_TOKEN_EXPIRE_MINUTES = 60
+SIGNUP_TOKEN_EXPIRE_MINUTES = 60
 REFRESH_TOKEN_EXPIRE_DAYS = 30
 
 
@@ -24,6 +25,7 @@ def create_access_token(
     payload = {
         "sub": str(user_id),
         "type": user_type,
+        "purpose":"access",
         "exp": expire
     }
 
@@ -32,6 +34,16 @@ def create_access_token(
         settings.JWT_SECRET_KEY,
         algorithm=ALGORITHM
     )
+
+
+def create_signup_token(email: str):
+    payload = {
+        "email": email,
+        "purpose": "signup",
+        "exp": datetime.utcnow() + timedelta(minutes=SIGNUP_TOKEN_EXPIRE_MINUTES)
+    }
+
+    return jwt.encode(payload, settings.JWT_SECRET_KEY, algorithm=ALGORITHM)
 
 
 def create_refresh_token():
