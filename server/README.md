@@ -58,3 +58,4 @@ Then exit from container and rebuild the image:
 - pydantic[email]
 - PyJWT
 - redis
+- resend[async]

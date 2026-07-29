@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
+from fastapi import BackgroundTasks
 
 from app.schemas.auth import (RegisterRequest, RequestEmailVerificationRequest, VerifyEmailRequest)
 from app.schemas.invitation import SendInvitationRequest
@@ -13,6 +14,7 @@ from app.models.refresh_token import (RefreshToken, UserType)
 from app.dependencies.auth import get_current_user
 from app.services.otp import (generate_otp, hash_otp)
 from app.core.redis import redis_client
+from app.services.email.emails import (send_verification_email, send_admin_invitation_email)
 from app.services.jwt import (
     create_access_token,
     create_refresh_token,
@@ -34,6 +36,7 @@ router = APIRouter(
 @router.post("/request-email-verification")
 def sendOTP(
     payload: RequestEmailVerificationRequest,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db)
 ):
     email = payload.email.lower().strip()
@@ -74,7 +77,11 @@ def sendOTP(
             detail="Unable to send verification code."
         )
 
-    # TODO: Send email
+    background_tasks.add_task(
+        send_verification_email,
+        email,
+        otp
+    )
     print(f"OTP for {email}: {otp}")
 
     return {
@@ -190,10 +197,10 @@ def register_institution(
     }
 
 
-# yet to implement email sending
 @router.post("/{institution_id}/admin/invitation")
 def invite_admins(
     institution_id: int,
+    background_tasks: BackgroundTasks,
     payload: SendInvitationRequest,
     token_data: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
@@ -234,6 +241,7 @@ def invite_admins(
             status_code=status.HTTP_409_CONFLICT,
             detail="One or more admin exist already."
         )
+    
 
     except Exception:
         db.rollback()
@@ -242,8 +250,15 @@ def invite_admins(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Something went wrong."
         )
-    
 
+    for admin in payload.admins:
+        background_tasks.add_task(
+            send_admin_invitation_email,
+            admin.email,
+            admin.password,
+            institution.name
+        )
+    
     return {
         "success": True,
         "message": "Invitation successful."
