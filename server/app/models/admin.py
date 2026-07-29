@@ -1,20 +1,15 @@
-from sqlalchemy import String
+from sqlalchemy import String, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.core.database import Base
 
 
-class Institution(Base):
-    __tablename__ = "institutions"
+class Admin(Base):
+    __tablename__ = "admins"
 
     id: Mapped[int] = mapped_column(
         primary_key=True,
         index=True
-    )
-
-    name: Mapped[str] = mapped_column(
-        String(255),
-        nullable=False
     )
 
     email: Mapped[str] = mapped_column(
@@ -29,8 +24,10 @@ class Institution(Base):
         nullable=False
     )
 
-    admins = relationship(
-        "Admin",
-        back_populates="institution",
-        cascade="all, delete-orphan"
+    institution_id: Mapped[int] = mapped_column(
+        ForeignKey("institutions.id"),
+        nullable=False,
+        index=True
     )
+
+    institution = relationship("Institution", back_populates="admins")

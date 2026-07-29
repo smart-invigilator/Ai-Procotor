@@ -4,9 +4,11 @@ from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 
 from app.schemas.auth import (RegisterRequest, LoginRequest, LogoutRequest)
+from app.schemas.invitation import SendInvitationRequest
 from app.core.database import get_db
 from app.services.password import (hash_password, verify_password)
 from app.models.institution import Institution
+from app.models.admin import Admin
 from app.models.refresh_token import (RefreshToken, UserType)
 from app.dependencies.auth import get_current_user
 from app.services.jwt import (
@@ -95,52 +97,50 @@ def register(
         )
 
 
-@router.post("/login", status_code=status.HTTP_200_OK)
-def login(
-    payload: LoginRequest,
+# yet to implement email sending
+@router.post("/{institution_id}/admin/invitation")
+def invite_admins(
+    institution_id: int,
+    payload: SendInvitationRequest,
+    token_data: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    institution = (
-        db.query(Institution)
-        .filter(
-            Institution.email == payload.email.lower().strip()
-        )
-        .first()
-    )
-    if not institution:
+    user_id = int(token_data["sub"])
+    user_type = token_data["type"]
+
+    if user_type != UserType.institution or institution_id != user_id:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Forbidden"
         )
-    if not verify_password(
-        payload.password,
-        institution.password
-    ):
+    
+    institution = db.get(Institution, institution_id)
+    if institution is None:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid email or password"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Institution not found."
         )
-
-    access_token = create_access_token(
-        user_id=institution.id,
-        user_type="institution"
-    )
-    refresh_token = create_refresh_token()
-
-    refresh_token_hash = hash_refresh_token(
-        refresh_token
-    )
-
-    refresh_record = RefreshToken(
-        user_id=institution.id,
-        user_type=UserType.institution,
-        token_hash=refresh_token_hash,
-        expires_at=datetime.utcnow() + timedelta(days=30)
-    )
+    
+    admins = [
+        Admin(
+            email=admin.email,
+            password=hash_password(admin.password),
+            institution_id=institution_id,
+        )
+        for admin in payload.admins
+    ]
 
     try:
-        db.add(refresh_record)
+        db.add_all(admins)
         db.commit()
+
+    except IntegrityError:
+        db.rollback()
+
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="One or more admin exist already."
+        )
 
     except Exception:
         db.rollback()
@@ -149,80 +149,9 @@ def login(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Something went wrong."
         )
-
-
-    return {
-        "success": True,
-        "message": "Login successful",
-        "data": {
-            "id": institution.id,
-            "name": institution.name,
-            "email": institution.email,
-            "access_token": access_token,
-            "refresh_token": refresh_token
-        }
-    }
-
-
-@router.post("/logout")
-def logout(
-    payload: LogoutRequest,
-    token_data: dict = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-
-    user_id = int(token_data["sub"])
-    user_type = token_data["type"]
-
-
-    refresh_token_hash = hash_refresh_token(
-        payload.refresh_token
-    )
-
-
-    refresh_token = (
-        db.query(RefreshToken)
-        .filter(
-            RefreshToken.token_hash == refresh_token_hash,
-            RefreshToken.user_id == user_id,
-            RefreshToken.user_type == user_type
-        )
-        .first()
-    )
-
-
-    if not refresh_token:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Refresh token not found"
-        )
-
-
-    refresh_token.revoked = True
-
-    db.commit()
-
+    
 
     return {
         "success": True,
-        "message": "Logged out successfully"
-    }
-
-
-@router.post("/reset-password")
-def reset_password():
-    return {
-        "success": True,
-        "message": "Password reset successful"
-    }
-
-
-@router.post("/invite-admins")
-def invite_admins():
-    # get an array of emails for inviting admins
-    # send email to all
-    # success
-    return {
-        "success": True,
-        "message": "Password reset successful"
+        "message": "Invitation successful."
     }
