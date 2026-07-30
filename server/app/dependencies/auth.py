@@ -15,7 +15,7 @@ def get_current_user(
 
     try:
         payload = decode_access_token(token)
-        if payload.purpose != "access":
+        if payload.get('purpose') != "access":
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid access token"

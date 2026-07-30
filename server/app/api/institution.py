@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta
 from fastapi import BackgroundTasks
-
+import jwt
 from app.schemas.auth import (RegisterRequest, RequestEmailVerificationRequest, VerifyEmailRequest)
 from app.schemas.invitation import SendInvitationRequest
 from app.core.database import get_db
