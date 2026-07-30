@@ -34,3 +34,9 @@ class Institution(Base):
         back_populates="institution",
         cascade="all, delete-orphan"
     )
+    
+    departments = relationship(
+        "Department",
+        back_populates="institution",
+        cascade="all, delete-orphan"
+    )

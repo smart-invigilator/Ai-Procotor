@@ -5,10 +5,12 @@ from datetime import datetime, timedelta
 from fastapi import BackgroundTasks
 import jwt
 from app.schemas.auth import (RegisterRequest, RequestEmailVerificationRequest, VerifyEmailRequest)
+from app.schemas.department import CreateDepartmentRequest
 from app.schemas.invitation import SendInvitationRequest
 from app.core.database import get_db
 from app.services.password import (hash_password, verify_password)
 from app.models.institution import Institution
+from app.models.department import Department
 from app.models.admin import Admin
 from app.models.refresh_token import (RefreshToken, UserType)
 from app.dependencies.auth import get_current_user
@@ -77,11 +79,11 @@ def sendOTP(
             detail="Unable to send verification code."
         )
 
-    background_tasks.add_task(
-        send_verification_email,
-        email,
-        otp
-    )
+    # background_tasks.add_task(
+    #     send_verification_email,
+    #     email,
+    #     otp
+    # )
     print(f"OTP for {email}: {otp}")
 
     return {
@@ -197,69 +199,3 @@ def register_institution(
     }
 
 
-@router.post("/{institution_id}/admin/invitation")
-def invite_admins(
-    institution_id: int,
-    background_tasks: BackgroundTasks,
-    payload: SendInvitationRequest,
-    token_data: dict = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    user_id = int(token_data["sub"])
-    user_type = token_data["type"]
-
-    if user_type != UserType.institution or institution_id != user_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Forbidden"
-        )
-    
-    institution = db.get(Institution, institution_id)
-    if institution is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Institution not found."
-        )
-    
-    admins = [
-        Admin(
-            email=admin.email,
-            password=hash_password(admin.password),
-            institution_id=institution_id,
-        )
-        for admin in payload.admins
-    ]
-
-    try:
-        db.add_all(admins)
-        db.commit()
-
-    except IntegrityError:
-        db.rollback()
-
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail="One or more admin exist already."
-        )
-    
-
-    except Exception:
-        db.rollback()
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Something went wrong."
-        )
-
-    for admin in payload.admins:
-        background_tasks.add_task(
-            send_admin_invitation_email,
-            admin.email,
-            admin.password,
-            institution.name
-        )
-    
-    return {
-        "success": True,
-        "message": "Invitation successful."
-    }
