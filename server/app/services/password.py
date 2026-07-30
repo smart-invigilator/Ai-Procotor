@@ -1,6 +1,6 @@
 import hashlib
 import secrets
-
+import string
 
 def hash_password(password: str):
     salt = secrets.token_hex(16)
