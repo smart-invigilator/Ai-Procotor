@@ -8,7 +8,7 @@ from app.models.admin import Admin
 from app.models.institution import Institution
 from app.models.refresh_token import UserType
 from app.schemas.invitation import SendInvitationRequest
-from app.services.password import hash_password
+from app.services.password import (hash_password, generate_password)
 
 
 router = APIRouter(
@@ -40,14 +40,26 @@ def invite_admins(
             detail="Institution not found."
         )
     
-    admins = [
-        Admin(
-            email=admin.email,
-            password=hash_password(admin.password),
-            institution_id=institution_id,
+    admins = []
+    admin_credentials = []
+
+    for admin in payload.admins:
+        plain_password = generate_password()
+
+        admins.append(
+            Admin(
+                email=admin.email,
+                password=hash_password(plain_password),
+                institution_id=institution_id,
+            )
         )
-        for admin in payload.admins
-    ]
+
+        admin_credentials.append(
+            {
+                "email": admin.email,
+                "password": plain_password,
+            }
+        )
 
     try:
         db.add_all(admins)
@@ -70,13 +82,13 @@ def invite_admins(
             detail="Something went wrong."
         )
 
-    # for admin in payload.admins:
-    #     background_tasks.add_task(
-    #         send_admin_invitation_email,
-    #         admin.email,
-    #         admin.password,
-    #         institution.name
-    #     )
+    # for credential in admin_credentials:
+    # background_tasks.add_task(
+    #     send_admin_invitation_email,
+    #     credential["email"],
+    #     credential["password"],
+    #     institution.name,
+    # )
     
     return {
         "success": True,

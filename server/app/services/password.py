@@ -26,3 +26,7 @@ def verify_password(password: str, stored_password: str):
     ).hex()
 
     return hashed == new_hash
+
+def generate_password(length: int = 10) -> str:
+    alphabet = string.ascii_letters + string.digits
+    return "".join(secrets.choice(alphabet) for _ in range(length))
