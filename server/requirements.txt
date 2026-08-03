@@ -1,0 +1,11 @@
+numpy
+ultralytics      
+librosa
+face_recognition   
+fer               
+sqlalchemy        
+reportlab          
+fastapi
+uvicorn
+websockets
+pydantic
